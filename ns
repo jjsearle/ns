@@ -1,0 +1,100 @@
+#!/bin/bash
+
+ProgName=$(basename $0)
+  
+sub_help(){
+    echo "Usage: $ProgName <subcommand> [options]"
+    echo "Subcommands:"
+    echo "    create  <optional_name> : Create new namespace and attach"
+    echo "    list                    : List active namespaces"
+    echo "    attach  <name>          : Attach to namespace"
+    echo "    del  <name>             : Delete a namespace and kill processes"
+    echo ""
+}
+  
+sub_create(){
+	RAND=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 4 | head -n 1)
+
+	if [[ "$1" == "" ]]; then
+		NS=$RAND
+	else
+		NS=$1
+	fi
+	    
+	VETH="veth_$RAND"
+	VPEER="vpeer_$RAND"
+	INDEX=$(ip netns ls | wc -l)
+	VETH_ADDR="10.255.$INDEX.1"
+	VPEER_ADDR="10.255.$INDEX.2"
+	DEV_NAME=$(ip link | awk -F: '$0 !~ "lo|vir|vet|^[^0-9]"{print $2a;getline}')
+
+
+	# Create namespace
+	ip netns del $NS &>/dev/null
+
+	# Create namespace
+	ip netns add $NS 
+
+	# Create veth link.
+	ip link del ${VETH} type veth peer name ${VPEER} &>/dev/null
+	ip link add ${VETH} type veth peer name ${VPEER}
+
+	# Add peer-1 to NS.
+	ip link set ${VPEER} netns $NS
+
+	# Setup IP address of ${VETH}.
+	ip addr add ${VETH_ADDR}/24 dev ${VETH}
+	ip link set ${VETH} up
+
+	# Setup IP ${VPEER}.
+	ip netns exec $NS ip addr add ${VPEER_ADDR}/24 dev ${VPEER}
+	ip netns exec $NS ip link set ${VPEER} up
+	ip netns exec $NS ip link set lo up
+	ip netns exec $NS ip route add default via ${VETH_ADDR}
+
+	# Enable IP-forwarding.
+	echo 1 > /proc/sys/net/ipv4/ip_forward
+
+	# Enable masquerading
+	iptables -t nat -A POSTROUTING -s ${VPEER_ADDR}/24 -o ${DEV_NAME} -j MASQUERADE
+	 
+	iptables -A FORWARD -i ${DEV_NAME} -o ${VETH} -d ${VPEER_ADDR} -j ACCEPT
+	iptables -A FORWARD -o ${DEV_NAME} -i ${VETH} -j ACCEPT
+
+	# Get into namespace
+	psfile="/tmp/netns.$NS"
+	echo "PS1=\"(\e[91m${NS}\e[39m) [\u@\h \W]\$ \"" > $psfile
+	ip netns exec ${NS} sudo -u $SUDO_USER -H sh -c "/bin/bash --rcfile $psfile"
+}
+
+sub_list(){
+	ip netns ls
+}
+  
+sub_attach(){
+	# Get into namespace
+	psfile="/tmp/netns.$1"
+	ip netns exec ${1} sudo -u $SUDO_USER -H sh -c "/bin/bash --rcfile $psfile"
+}
+
+sub_del(){
+	psfile="/tmp/netns.$1"
+	rm $psfile
+	ip netns del $1
+}
+  
+subcommand=$1
+case $subcommand in
+    "" | "-h" | "--help")
+        sub_help
+        ;;
+    *)
+        shift
+        sub_${subcommand} $@
+        if [ $? = 127 ]; then
+            echo "Error: '$subcommand' is not a known subcommand." >&2
+            echo "       Run '$ProgName --help' for a list of known subcommands." >&2
+            exit 1
+        fi
+        ;;
+esac
