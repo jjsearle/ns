@@ -3,6 +3,9 @@
 ProgName=$(basename $0)
   
 sub_help(){
+	# Subcommand 'help'
+	# Display script usage information
+
     echo "Usage: $ProgName <subcommand> [options]"
     echo "Subcommands:"
     echo "    create  <optional_name> : Create new namespace and attach"
@@ -13,8 +16,12 @@ sub_help(){
 }
   
 sub_create(){
+	# Subcommand 'create'
+	# Create a new namespace. 
+
 	RAND=$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 4 | head -n 1)
 
+	# If a name has been specified, use that, otherwise use a randomly generated name.
 	if [[ "$1" == "" ]]; then
 		NS=$RAND
 	else
@@ -61,28 +68,37 @@ sub_create(){
 	iptables -A FORWARD -i ${DEV_NAME} -o ${VETH} -d ${VPEER_ADDR} -j ACCEPT
 	iptables -A FORWARD -o ${DEV_NAME} -i ${VETH} -j ACCEPT
 
-	# Get into namespace
+	# Attach to the namespace
 	psfile="/tmp/netns.$NS"
 	echo "PS1=\"(\e[91m${NS}\e[39m) [\u@\h \W]\$ \"" > $psfile
 	ip netns exec ${NS} sudo -u $SUDO_USER -H sh -c "/bin/bash --rcfile $psfile"
 }
 
 sub_list(){
+	# Subcommand 'list'
+	# List all existing namespaces.
+
 	ip netns ls
 }
   
 sub_attach(){
-	# Get into namespace
+	# Subcommand 'attach'
+	# Attach terminal to specified namespace.
+
 	psfile="/tmp/netns.$1"
 	ip netns exec ${1} sudo -u $SUDO_USER -H sh -c "/bin/bash --rcfile $psfile"
 }
 
 sub_del(){
+	# Subcommand 'del'
+	# Delete the specified name space.
+
 	psfile="/tmp/netns.$1"
 	rm $psfile
 	ip netns del $1
 }
   
+# Handle subcommands
 subcommand=$1
 case $subcommand in
     "" | "-h" | "--help")
